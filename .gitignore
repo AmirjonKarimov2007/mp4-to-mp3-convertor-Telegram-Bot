@@ -6,6 +6,7 @@ __pycache__
 venv
 .venv
 .env
+.idea
 log.log
 **/node_modules
 *.pyc
