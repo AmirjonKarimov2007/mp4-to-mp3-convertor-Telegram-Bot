@@ -25,6 +25,7 @@ async def add_admin_method(message: types.Message, state: FSMContext):
     await message.answer("👨🏻‍💻 Yangi admin ismini yuborin",
                                  reply_markup=back_to_main_menu)
     await SuperAdminState.SUPER_ADMIN_ADD_FULLNAME.set()
+    
 #Dasturchi @Mrgayratov kanla @Kingsofpy
 @dp.message_handler(IsSuperAdmin(), state=SuperAdminState.SUPER_ADMIN_ADD_FULLNAME)
 async def add_admin_method(message: types.Message,state: FSMContext):
@@ -180,48 +181,75 @@ async def channel_list(call: types.CallbackQuery):
 async def stat(call : types.CallbackQuery):
     stat = await db.stat()
     stat = str(stat)
-    for x in stat:
-        dta = x
-        datas = datetime.datetime.now()
-        yil_oy_kun = (datetime.datetime.date(datetime.datetime.now()))
-        soat_minut_sekund = f"{datas.hour}:{datas.minute}:{datas.second}"
-        await call.message.delete()
-        await call.message.answer(f"<b>👥 Bot foydalanuvchilari soni: {(x)} nafar\n</b>"
-                                  f"<b>⏰ Soat: {soat_minut_sekund}\n</b>"
-                                  f"<b>📆 Sana: {yil_oy_kun}</b>",reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("◀️ Orqaga",callback_data="back_to_main_menu")))
+    await call.message.delete()
+    datas = datetime.datetime.now()
+    yil_oy_kun = (datetime.datetime.date(datetime.datetime.now()))
+    soat_minut_sekund = f"{datas.hour}:{datas.minute}:{datas.second}"
+    await call.message.answer(f"<b>👥 Bot foydalanuvchilari soni: {(stat)} nafar\n</b>"
+                                f"<b>⏰ Soat: {soat_minut_sekund}\n</b>"
+                                f"<b>📆 Sana: {yil_oy_kun}</b>",reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("◀️ Orqaga",callback_data="back_to_main_menu")))
 
 
 # ADMINGA SEND FUNC
 @dp.callback_query_handler(IsSuperAdmin(), text="send_message_to_admins", state="*")
 async def send_advertisement(call: types.CallbackQuery):
     await call.answer(cache_time=1)
-    await call.message.edit_text("Reklamani yuboring...\n"
+    await call.message.edit_text("Adminlarga Reklamani yuboring...\n"
                                  "Yoki bekor qilish tugmasini bosing", reply_markup=back_to_main_menu)
     await SuperAdminState.SUPER_ADMIN_SEND_MESSAGE_TO_ADMINS.set()
 
 
 @dp.message_handler(IsSuperAdmin(), state=SuperAdminState.SUPER_ADMIN_SEND_MESSAGE_TO_ADMINS,content_types=types.ContentTypes.ANY)
-async def send_advertisement_to_user(message: types.Message,state: FSMContext):
-    users = await db.stat_admins()
-    users = str(users)
-    await message.answer(f"📢 Reklama jo'natish boshlandi...\n"
-                             f"📊 Adminlar soni: {users} ta\n"
-                             f"🕒 Kuting...\n")
-    user = await db.select_all_admins()
+async def send_advertisement_to_user(message: types.Message, state: FSMContext):
+    users = await db.stat()
+    admin_list = await db.select_all_admins()
+    
+    black_list = 0
+    white_list = 0
+    seriy_list = 0
+    datas = datetime.datetime.now()
+    boshlanish_vaqti = f"{datas.hour}:{datas.minute}:{datas.second}"
 
-    for i in user:
-        user_id= i['user_id']
-        try:
-            await bot.copy_message(chat_id=user_id, from_chat_id=message.chat.id,
-                                    message_id=message.message_id,reply_markup=message.reply_markup, parse_mode=types.ParseMode.HTML)
+    start_msg = await message.answer(f"📢 Reklama jo'natish boshlandi...\n"
+                                      f"📊 Adminlar soni: {users} ta\n"
+                                      f"🕒 Kuting...\n")
 
-            time.sleep(0.5)
-        except Exception as e:
-            print(e)
+    semaphore = Semaphore(20)  # Har bir vaqtda 20 ta xabar yuborish bilan cheklov
+    errors = []
 
+    async def send_message(user_id):
+        nonlocal black_list, white_list
+        async with semaphore:
+            try:
+                await bot.copy_message(chat_id=user_id, from_chat_id=message.chat.id,
+                                       message_id=message.message_id, reply_markup=message.reply_markup)
+                white_list += 1
+            except Exception as e:
+                if "bot was blocked by the user" in str(e):
+                    black_list += 1
+                else:
+                    seriy_list += 1
+                errors.append((user_id, str(e)))
 
-        await message.answer("✅ Reklama muvaffaqiyatli yuborildi!", reply_markup=main_menu_for_super_admin)
-        await state.finish()
+    # Foydalanuvchilarga parallel xabar yuborish
+    tasks = [send_message(admin['user_id']) for admin in admin_list]
+
+    await gather(*tasks)
+
+    data = datetime.datetime.now()
+    tugash_vaqti = f"{data.hour}:{data.minute}:{data.second}"
+    
+    text = (f'<b>✅ Reklama muvaffaqiyatli yuborildi!</b>\n\n'
+            f'<b>⏰ Boshlangan vaqt: {boshlanish_vaqti}</b>\n'
+            f'<b>👥 Yuborilgan adminlar soni: {white_list}</b>\n'
+            f'<b>🚫 Botni Bloklagan adminlar soni: {black_list}</b>\n'
+            f'<b>🔖 Reklama Yuborilmagan adminlar soni: {seriy_list}</b>\n'
+            f'<b>🏁 Tugash vaqti: {tugash_vaqti}</b>\n')
+
+    await bot.delete_message(chat_id=start_msg.chat.id, message_id=start_msg.message_id)
+    await message.answer(text, reply_markup=main_menu_for_super_admin)
+    await state.finish()
+
 
 # ====================Foydalanuvchliar uchun SEND SUNC  ============================
 @dp.callback_query_handler(IsSuperAdmin(), text="send_advertisement", state="*")
@@ -231,38 +259,55 @@ async def send_advertisement(call: types.CallbackQuery):
                                  "Yoki bekor qilish tugmasini bosing", reply_markup=back_to_main_menu)
     await SuperAdminState.SUPER_ADMIN_STATE_GET_ADVERTISEMENT.set()
 
-
+from asyncio import Semaphore,gather
 @dp.message_handler(IsSuperAdmin(), state=SuperAdminState.SUPER_ADMIN_STATE_GET_ADVERTISEMENT,
                     content_types=types.ContentTypes.ANY)
 async def send_advertisement_to_user(message: types.Message, state: FSMContext):
     users = await db.stat()
-    users = str(users)
+    user_list = await db.select_all_users()
+    
     black_list = 0
     white_list = 0
+    seriy_list = 0
     datas = datetime.datetime.now()
     boshlanish_vaqti = f"{datas.hour}:{datas.minute}:{datas.second}"
-    start_msg = await message.answer(f"📢 Reklama jo'natish boshlandi...\n"
-                         f"📊 Foydalanuvchilar soni: {users} ta\n"
-                         f"🕒 Kuting...\n")
-    user = await db.select_all_users()
-    for i in user:
-        user_id = i['user_id']
-        try:
-            msg = await bot.copy_message(chat_id=user_id, from_chat_id=message.chat.id,
-                                            message_id=message.message_id,reply_markup=message.reply_markup)
-            white_list += 1
-            time.sleep(0.5)
-        except Exception as e:
-            black_list += 1
-    data = datetime.datetime.now()
 
+    start_msg = await message.answer(f"📢 Reklama jo'natish boshlandi...\n"
+                                      f"📊 Foydalanuvchilar soni: {users} ta\n"
+                                      f"🕒 Kuting...\n")
+
+    semaphore = Semaphore(20)  # Har bir vaqtda 20 ta xabar yuborish bilan cheklov
+    errors = []
+
+    async def send_message(user_id):
+        nonlocal black_list, white_list
+        async with semaphore:
+            try:
+                await bot.copy_message(chat_id=user_id, from_chat_id=message.chat.id,
+                                       message_id=message.message_id, reply_markup=message.reply_markup)
+                white_list += 1
+            except Exception as e:
+                if "bot was blocked by the user" in str(e):
+                    black_list += 1
+                else:
+                    seriy_list += 1
+                errors.append((user_id, str(e)))
+
+    # Foydalanuvchilarga parallel xabar yuborish
+    tasks = [send_message(user['user_id']) for user in user_list]
+    await gather(*tasks)
+
+    data = datetime.datetime.now()
     tugash_vaqti = f"{data.hour}:{data.minute}:{data.second}"
-    text = f'<b>✅ Reklama muvaffaqiyatli yuborildi!</b>\n\n'
-    text += f'<b>⏰Reklama yuborishning boshlangan vaqt: {boshlanish_vaqti}</b>\n'
-    text += f"<b>👥 Reklama yuborilgan foydalanuchilar soni:{white_list}</b>\n"
-    text += f"<b>🚫Reklama yuborilmagan foydalanuvchilar soni:{black_list}</b>\n"
-    text += f'<b>🏁Reklama yuborishning tugash vaqt: {tugash_vaqti}</b>\n'
-    await bot.delete_message(chat_id=start_msg.chat.id,message_id=start_msg.message_id)
+    
+    text = (f'<b>✅ Reklama muvaffaqiyatli yuborildi!</b>\n\n'
+            f'<b>⏰ Boshlangan vaqt: {boshlanish_vaqti}</b>\n'
+            f'<b>👥 Yuborilgan foydalanuvchilar soni: {white_list}</b>\n'
+            f'<b>🚫 Botni Bloklagan foydalanuvchilar soni: {black_list}</b>\n'
+            f'<b>🔖 Reklama Yuborilmagan foydalanuvchilar soni: {seriy_list}</b>\n'
+            f'<b>🏁 Tugash vaqti: {tugash_vaqti}</b>\n')
+
+    await bot.delete_message(chat_id=start_msg.chat.id, message_id=start_msg.message_id)
     await message.answer(text, reply_markup=main_menu_for_super_admin)
     await state.finish()
 
